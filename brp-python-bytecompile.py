@@ -1,7 +1,4 @@
 #!/usr/bin/python3
-# TODO: we should fail/warn when there is a python libdir without installed runtime
-from __future__ import print_function
-
 import argparse
 try:
     import configparser
@@ -34,9 +31,10 @@ class ByteCompileConfig(object):
         self._compile_dirs = kwargs.get('compile_dirs',
             os.path.join(os.path.sep, '{rootdir}', 'usr', 'lib', '{fname}') + ':' +
             os.path.join(os.path.sep, '{rootdir}', 'usr', 'lib64', '{fname}'))
+        # TODO: document that rx is never read from config file (IMO makes sense)
         self._inline_script = kwargs.get('inline_script', 'import compileall, sys;' + \
-            'sys.exit(not compileall.compile_dir("{python_libdir}", {depth}, "{real_libdir}",' + \
-            'force=1, quiet=1))')
+            'sys.exit(not compileall.compile_dir("{python_libdir}", {depth}, "{real_libdir}", ' + \
+            'force=1, quiet=1, rx={rx}))')
         self._run = kwargs.get('run', "{python} {flags} -c '{inline_script}'")
         # TODO: check format of provided attributes
 
@@ -53,12 +51,19 @@ class ByteCompileConfig(object):
         # TODO
         return 1000
 
-    def get_run_strings(self, rpm_buildroot):
+    def get_compile_invocations(self, rpm_buildroot, exclude_dirs=[]):
         flags_variations = []
         for f in self._flags_variations:
             flags_variations.append(self.formatted_dict['flags'] + ' ' + f)
 
-        run_strings = []
+        invocations = self._get_libdir_compile_invocations(rpm_buildroot, flags_variations)
+        invocations.extend(self._get_rootdir_compile_invocations(rpm_buildroot,
+            flags_variations, exclude_dirs))
+
+        return invocations
+
+    def _get_libdir_compile_invocations(self, rpm_buildroot, flags_variations):
+        invocations = []
         # first, obtain run strings for libdirs
         for l in self.formatted_dict['compile_dirs']:
             # can't use os.path.join, since l is absolute
@@ -68,20 +73,29 @@ class ByteCompileConfig(object):
             real_libdir = l
             # construct the whole inline script
             form_dict = dict(python_libdir=python_libdir, depth=self.get_depth(l),
-                real_libdir=real_libdir, **self.formatted_dict)
-            inline_script = self._inline_script.format(**form_dict)
-            form_dict['inline_script'] = inline_script
+                real_libdir=real_libdir, rx=None, **self.formatted_dict)
+            form_dict['inline_script'] = self._inline_script.format(**form_dict)
 
             # construct the whole commands
             for f in flags_variations:
                 form_dict['flags'] = f
-                run_strings.append(self._run.format(**form_dict))
+                invocations.append(self._run.format(**form_dict))
 
-        # then, if self.formatted_dict['default_for_rootdir'], obtain run string
-        #  for compiling the whole self.formatted_dict['rootdir']
-        # TODO: this has to know about other roots, so that it can ignore them
+        return invocations
 
-        return run_strings
+    def _get_rootdir_compile_invocations(self, rpm_buildroot, flags_variations, exclude_dirs):
+        invocations = []
+        if self.formatted_dict['default_for_rootdir']:
+            rx = "re.compile(r'{0}')".format('|'.join(exclude_dirs))
+            form_dict = dict(python_libdir=rpm_buildroot, depth=self.get_depth(rpm_buildroot),
+                real_libdir=os.path.sep, rx=rx, **self.formatted_dict)
+            form_dict['inline_script'] = self._inline_script.format(**form_dict)
+
+            for f in flags_variations:
+                form_dict['flags'] = f
+                invocations.append(self._run.format(**form_dict))
+
+        return invocations
 
     @classmethod
     def from_file(cls, fullpath):
@@ -112,12 +126,15 @@ def bytecompile(rpm_buildroot, default_python, errors_terminate, config_dir, dry
 
     to_run = {}
     for fname, config in configs.items():
-        to_run[fname] = config.get_run_strings(rpm_buildroot=rpm_buildroot)
+        # get list of dirs to exclude when compiling by this config
+        exclude_dirs = get_exclude_dirs(configs, rpm_buildroot, fname)
+        to_run[fname] = \
+            config.get_compile_invocations(rpm_buildroot=rpm_buildroot, exclude_dirs=exclude_dirs)
 
     if dry_run:
         for fname, run_strings in to_run.items():
-            logging.info('Running from {fname}:'.format(fname))
-            logging.info(run_strings)
+            logging.info('Running from {0}:'.format(fname))
+            [logging.info(rs) for rs in sorted(run_strings)]
 
     return 0
 
@@ -129,7 +146,7 @@ def unassoc_libdirs_errors(configs, rpm_buildroot):
         buildroot_libdirs.extend(glob.glob(ld_fullpath_normalized))
 
     config_libdirs = []
-    for cf in configs.items():
+    for cf in configs.values():
         # can't use os.path.join, since config.formatted_dict['compile_dirs']
         #  contains absolute paths
         libdirs = [os.path.abspath(rpm_buildroot + l) for l in cf.formatted_dict['compile_dirs']]
@@ -139,7 +156,7 @@ def unassoc_libdirs_errors(configs, rpm_buildroot):
 
     if not_matched:
         logging.error('Error: there are Python libdirs not associated with any Python runtime:')
-        [logging.error(nm) for nm in not_matched]
+        [logging.error(nm) for nm in sorted(not_matched)]
         return True
 
     return False
@@ -163,10 +180,26 @@ def compile_roots_errors(configs):
     errs = {path: pythons for path, pythons in path_to_pythons.items() if len(pythons) > 1}
     if errs:
         logging.error('Config error, following roots are to be compiled by multiple Pythons:')
-        logging.error(errs, file=sys.stderr)
+        [logging.error(e) for e in sorted(errs)]
         return True
 
     return False
+
+
+def get_exclude_dirs(configs, rpm_buildroot, current):
+    # exclude all bin and sbin directories - TODO: is this right? probably yes, but rethink...
+    #  we purposely do this without prepending rpm_buildroot to catch all bindirs everywhere
+    # TODO: add libdirs glob?
+    excl = ['/bin/', '/sbin/']
+
+    for fname, config in configs.items():
+        if fname != current:
+            if config.formatted_dict['default_for_rootdir']:
+                excl.append(os.path.abspath(rpm_buildroot + config.formatted_dict['rootdir']))
+            excl.extend([os.path.abspath(rpm_buildroot + d) \
+                for d in config.formatted_dict['compile_dirs']])
+
+    return excl
 
 
 def _load_configs(location):

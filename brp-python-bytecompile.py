@@ -13,8 +13,22 @@ import subprocess
 import sys
 
 
-PYTHON_LIBDIRS = [os.path.join('usr', 'lib', 'python[0-9].[0-9]'),
-    os.path.join('usr', 'lib64', 'python[0-9].[0-9]')]
+def path_norm_join(path, *more):
+    """Normalize a path using os.path.abspath. If more paths are given,
+    they are merged, normalized and returned. Unlike os.path.join, this
+    also works when any of the paths is/are absolute."""
+    result = [path]
+    result.extend(more)
+    # if there are two slashes in the start, os.path.abspath won't normalize
+    #  TODO: find out why this happens
+    joined = os.path.abspath(os.path.sep.join(result))
+    if joined.startswith(os.path.sep * 2) and not joined.startswith(os.path.sep * 3):
+        return joined[1:]
+    return joined
+
+
+PYTHON_LIBDIRS = [path_norm_join(os.path.sep, 'usr', 'lib', 'python[0-9].[0-9]'),
+    path_norm_join(os.path.sep, 'usr', 'lib64', 'python[0-9].[0-9]')]
 logging.basicConfig(format=os.path.basename(__file__) + ': %(message)s', level=logging.INFO)
 
 
@@ -27,10 +41,10 @@ class ByteCompileConfig(object):
         self._default_for_rootdir = kwargs.get('default_for_rootdir', '0')
         self._flags = kwargs.get('flags', '')
         self._python = kwargs.get('python',
-            os.path.join(os.path.sep, '{rootdir}', 'usr', 'bin', '{fname}'))
+            path_norm_join(os.path.sep, '{rootdir}', 'usr', 'bin', '{fname}'))
         self._compile_dirs = kwargs.get('compile_dirs',
-            os.path.join(os.path.sep, '{rootdir}', 'usr', 'lib', '{fname}') + ':' +
-            os.path.join(os.path.sep, '{rootdir}', 'usr', 'lib64', '{fname}'))
+            path_norm_join(os.path.sep, '{rootdir}', 'usr', 'lib', '{fname}') + ':' +
+            path_norm_join(os.path.sep, '{rootdir}', 'usr', 'lib64', '{fname}'))
         # TODO: document that rx is never read from config file (IMO makes sense)
         self._inline_script = kwargs.get('inline_script', 'import compileall, sys;' + \
             'sys.exit(not compileall.compile_dir("{python_libdir}", {depth}, "{real_libdir}", ' + \
@@ -43,18 +57,20 @@ class ByteCompileConfig(object):
         self.formatted_dict['rootdir'] = self._rootdir.format(**self.formatted_dict)
         self.formatted_dict['default_for_rootdir'] = (self._default_for_rootdir == '1')
         self.formatted_dict['flags'] = self._flags  # no formatting for flags for now
-        self.formatted_dict['python'] = self._python.format(**self.formatted_dict)
+        self.formatted_dict['python'] = \
+            path_norm_join(self._python.format(**self.formatted_dict))
         self.formatted_dict['compile_dirs'] = \
-            self._compile_dirs.format(**self.formatted_dict).split(':')
+            [path_norm_join(p) for p in self._compile_dirs.format(**self.formatted_dict).split(':')]
 
     def get_depth(self, directory):
-        # TODO
-        return 1000
+        """Get depth of given directory."""
+        dir_slashes = directory.count(os.path.sep)
+        return max((path[0].count(os.path.sep) for path in os.walk(directory))) - dir_slashes
 
     def get_compile_invocations(self, rpm_buildroot, exclude_dirs=[]):
         flags_variations = []
         for f in self._flags_variations:
-            flags_variations.append(self.formatted_dict['flags'] + ' ' + f)
+            flags_variations.append(' '.join([self.formatted_dict['flags'], f]).strip())
 
         invocations = self._get_libdir_compile_invocations(rpm_buildroot, flags_variations)
         invocations.extend(self._get_rootdir_compile_invocations(rpm_buildroot,
@@ -66,13 +82,13 @@ class ByteCompileConfig(object):
         invocations = []
         # first, obtain run strings for libdirs
         for l in self.formatted_dict['compile_dirs']:
-            # can't use os.path.join, since l is absolute
-            python_libdir = rpm_buildroot + l
+            python_libdir = path_norm_join(rpm_buildroot, l)
             if not os.path.exists(python_libdir):
                 continue
             real_libdir = l
             # construct the whole inline script
-            form_dict = dict(python_libdir=python_libdir, depth=self.get_depth(l),
+            form_dict = dict(python_libdir=python_libdir,
+                depth=self.get_depth(python_libdir),
                 real_libdir=real_libdir, rx=None, **self.formatted_dict)
             form_dict['inline_script'] = self._inline_script.format(**form_dict)
 
@@ -87,7 +103,8 @@ class ByteCompileConfig(object):
         invocations = []
         if self.formatted_dict['default_for_rootdir']:
             rx = "re.compile(r'{0}')".format('|'.join(exclude_dirs))
-            form_dict = dict(python_libdir=rpm_buildroot, depth=self.get_depth(rpm_buildroot),
+            form_dict = dict(python_libdir=rpm_buildroot,
+                depth=self.get_depth(rpm_buildroot),
                 real_libdir=os.path.sep, rx=rx, **self.formatted_dict)
             form_dict['inline_script'] = self._inline_script.format(**form_dict)
 
@@ -114,10 +131,10 @@ class ByteCompileConfig(object):
 
 def bytecompile(rpm_buildroot, default_python, errors_terminate, config_dir, dry_run):
     # normalize rpm_buildroot, removing duplicate slashes
-    rpm_buildroot = os.path.abspath(rpm_buildroot)
+    rpm_buildroot = path_norm_join(rpm_buildroot)
     if rpm_buildroot == '/':
         return 0
-    configs = _load_configs(config_dir)
+    configs = load_configs(config_dir)
 
     if compile_roots_errors(configs):
         return 10
@@ -133,7 +150,7 @@ def bytecompile(rpm_buildroot, default_python, errors_terminate, config_dir, dry
 
     if dry_run:
         for fname, run_strings in to_run.items():
-            logging.info('Running from {0}:'.format(fname))
+            logging.info('Running from config "{0}":'.format(fname))
             [logging.info(rs) for rs in sorted(run_strings)]
 
     return 0
@@ -142,14 +159,12 @@ def bytecompile(rpm_buildroot, default_python, errors_terminate, config_dir, dry
 def unassoc_libdirs_errors(configs, rpm_buildroot):
     buildroot_libdirs = []
     for pld in PYTHON_LIBDIRS:
-        ld_fullpath_normalized = os.path.abspath(os.path.join(rpm_buildroot, pld))
+        ld_fullpath_normalized = path_norm_join(rpm_buildroot, pld)
         buildroot_libdirs.extend(glob.glob(ld_fullpath_normalized))
 
     config_libdirs = []
     for cf in configs.values():
-        # can't use os.path.join, since config.formatted_dict['compile_dirs']
-        #  contains absolute paths
-        libdirs = [os.path.abspath(rpm_buildroot + l) for l in cf.formatted_dict['compile_dirs']]
+        libdirs = [path_norm_join(rpm_buildroot, l) for l in cf.formatted_dict['compile_dirs']]
         config_libdirs.extend(libdirs)
 
     not_matched = set(buildroot_libdirs) - set(config_libdirs)
@@ -168,8 +183,7 @@ def compile_roots_errors(configs):
     compile_roots = {}
     for fname, config in configs.items():
         if config.formatted_dict['default_for_rootdir']:
-            # normalize the path by os.path.abspath
-            compile_roots[fname] = os.path.abspath(config.formatted_dict['rootdir'])
+            compile_roots[fname] = path_norm_join(config.formatted_dict['rootdir'])
 
     # mapping {rootdir: [config_filename, ...]}
     path_to_pythons = {}
@@ -189,22 +203,22 @@ def compile_roots_errors(configs):
 def get_exclude_dirs(configs, rpm_buildroot, current):
     # exclude all bin and sbin directories - TODO: is this right? probably yes, but rethink...
     #  we purposely do this without prepending rpm_buildroot to catch all bindirs everywhere
-    # TODO: add libdirs glob?
     excl = ['/bin/', '/sbin/']
+    excl.extend(PYTHON_LIBDIRS)
 
     for fname, config in configs.items():
         if fname != current:
             if config.formatted_dict['default_for_rootdir']:
-                excl.append(os.path.abspath(rpm_buildroot + config.formatted_dict['rootdir']))
-            excl.extend([os.path.abspath(rpm_buildroot + d) \
+                excl.append(path_norm_join(rpm_buildroot, config.formatted_dict['rootdir']))
+            excl.extend([path_norm_join(rpm_buildroot, d) \
                 for d in config.formatted_dict['compile_dirs']])
 
     return excl
 
 
-def _load_configs(location):
+def load_configs(location):
     configs = {}
-    for cf in glob.glob(os.path.join(location, '*.conf')):
+    for cf in glob.glob(path_norm_join(location, '*.conf')):
         config = ByteCompileConfig.from_file(cf)
         configs[config.fname] = config
     return configs

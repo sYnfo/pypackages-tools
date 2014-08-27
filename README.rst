@@ -74,6 +74,7 @@ The substitution works like this:
   files) and ``{rx}`` (``None`` or ``re.compile(...)`` expression that contains directories
   to omit when bytecompiling - these are passed if compiling the whole ``rootdir``)
 * ``run`` can use any of the above values for substitution
+* note, that ``rx`` value is always constructed dynamically and never read from the config file
 
 TODO: the detailed documentation should probably be moved to a standalone document
 

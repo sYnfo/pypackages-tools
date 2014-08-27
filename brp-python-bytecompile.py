@@ -54,7 +54,7 @@ class ByteCompileConfig(object):
 
         # not create non-underscored versions of some attributes
         self.formatted_dict = {'fname': self.fname}
-        self.formatted_dict['rootdir'] = self._rootdir.format(**self.formatted_dict)
+        self.formatted_dict['rootdir'] = path_norm_join(self._rootdir.format(**self.formatted_dict))
         self.formatted_dict['default_for_rootdir'] = (self._default_for_rootdir == '1')
         self.formatted_dict['flags'] = self._flags  # no formatting for flags for now
         self.formatted_dict['python'] = \
@@ -105,9 +105,10 @@ class ByteCompileConfig(object):
         invocations = []
         if self.formatted_dict['default_for_rootdir']:
             rx = "re.compile(r'{0}')".format('|'.join(exclude_dirs))
-            form_dict = dict(compile_dir=rpm_buildroot,
-                depth=self.get_depth(rpm_buildroot),
-                real_dir=os.path.sep, rx=rx, **self.formatted_dict)
+            compile_dir = path_norm_join(rpm_buildroot, self.formatted_dict['rootdir'])
+            form_dict = dict(compile_dir=compile_dir,
+                depth=self.get_depth(compile_dir),
+                real_dir=self.formatted_dict['rootdir'], rx=rx, **self.formatted_dict)
             form_dict['inline_script'] = self._inline_script.format(**form_dict)
 
             for f in flags_variations:
@@ -205,19 +206,20 @@ def compile_roots_errors(configs):
 
 
 def get_exclude_dirs(configs, rpm_buildroot, current):
-    # exclude all bin and sbin directories - TODO: is this right? probably yes, but rethink...
+    # exclude all bin and sbin directories and python libdirs- TODO: is this right? probably yes
     #  we purposely do this without prepending rpm_buildroot to catch all bindirs everywhere
     excl = ['/bin/', '/sbin/']
     excl.extend(PYTHON_LIBDIRS)
 
     for fname, config in configs.items():
         if fname != current:
+            # TODO: is it ok to pu whole dirs including rpm_buildroot here? probably yes
             if config.formatted_dict['default_for_rootdir']:
                 excl.append(path_norm_join(rpm_buildroot, config.formatted_dict['rootdir']))
             excl.extend([path_norm_join(rpm_buildroot, d) \
                 for d in config.formatted_dict['compile_dirs']])
 
-    return excl
+    return sorted(excl)
 
 
 def load_configs(location):

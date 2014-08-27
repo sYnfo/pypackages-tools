@@ -71,8 +71,10 @@ The substitution works like this:
   above, it can also use values generated dynamically by the bytecompile script: ``{compile_dir}``
   (full path of the directory to compile, including RPM buildroot path), ``{depth}`` (depth of
   ``compile_dir``), ``{real_dir}`` (real directory location to hardcode to ``pyc`` and ``pyo``
-  files) and ``{rx}`` (``None`` or regular expression that contains directories to omit when
-  bytecompiling - these are passed when compiling the whole ``rootdir``)
-* ``run`` is the whole invocation, can use any of the above values for substitution
+  files) and ``{rx}`` (``None`` or ``re.compile(...)`` expression that contains directories
+  to omit when bytecompiling - these are passed if compiling the whole ``rootdir``)
+* ``run`` can use any of the above values for substitution
+
+TODO: the detailed documentation should probably be moved to a standalone document
 
 Licensed under GPLv2+.

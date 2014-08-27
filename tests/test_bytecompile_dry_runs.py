@@ -157,9 +157,9 @@ def test_complex(pyruntime):
     # check python33 (SCL)
     python = '/opt/rh/python33/root/usr/bin/python'
     to_compile = to_compile_base + '/opt/rh/python33/root'
-    excl_dirs = excl_dirs_base + [os.path.join(TEST_ROOTS, testdir, rpm_buildroot, d).rstrip('/') for d in
+    excl_dirs = excl_dirs_base + [os.path.join(TEST_ROOTS, testdir, rpm_buildroot, d) for d in
         ['usr/lib/python3.4', 'usr/lib64/python3.4',
-         'usr/lib/python2.7', 'usr/lib64/python2.7', '']]
+         'usr/lib/python2.7', 'usr/lib64/python2.7']]
     rx = "re.compile(r'{excl}')".format(excl='|'.join(sorted(excl_dirs)))
     inline_script = ['import compileall, sys, re; ',
         'sys.exit(not compileall.compile_dir("{to_compile}", {depth}, "{real_dir}", ',

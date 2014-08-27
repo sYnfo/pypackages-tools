@@ -104,10 +104,13 @@ class ByteCompileConfig(object):
     def _get_rootdir_compile_invocations(self, rpm_buildroot, flags_variations, exclude_dirs):
         invocations = []
         if self.formatted_dict['default_for_rootdir']:
-            rx = "re.compile(r'{0}')".format('|'.join(exclude_dirs))
-            compile_dir = path_norm_join(rpm_buildroot, self.formatted_dict['rootdir'])
-            form_dict = dict(compile_dir=compile_dir,
-                depth=self.get_depth(compile_dir),
+            full_rootdir = path_norm_join(rpm_buildroot, self.formatted_dict['rootdir'])
+            # we can really exclude only these dirs that are not superdirs of rootdir
+            really_exclude = [d for d in exclude_dirs if not full_rootdir.startswith(d)]
+
+            rx = "re.compile(r'{0}')".format('|'.join(really_exclude))
+            form_dict = dict(compile_dir=full_rootdir,
+                depth=self.get_depth(full_rootdir),
                 real_dir=self.formatted_dict['rootdir'], rx=rx, **self.formatted_dict)
             form_dict['inline_script'] = self._inline_script.format(**form_dict)
 

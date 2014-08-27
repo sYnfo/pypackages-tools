@@ -19,11 +19,7 @@ def path_norm_join(path, *more):
     also works when any of the paths is/are absolute."""
     result = [path]
     result.extend(more)
-    # if there are two slashes in the start, os.path.abspath won't normalize
-    #  TODO: find out why this happens
     joined = os.path.abspath(os.path.sep.join(result))
-    if joined.startswith(os.path.sep * 2) and not joined.startswith(os.path.sep * 3):
-        return joined[1:]
     return joined
 
 

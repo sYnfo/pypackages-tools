@@ -47,7 +47,7 @@ def assert_compile_string(retcode, output, **kwargs):
     kwargs['to_compile'] = os.path.join(TEST_ROOTS, kwargs['to_compile'])
     flags_variations = ['', '-O']
 
-    check_template = [BYTECOMPILE_SCRIPT + ': {python} {flags} -c \'import compileall, sys;',
+    check_template = [BYTECOMPILE_SCRIPT + ': {python} {flags} -c \'import compileall, sys, re; ',
         'sys.exit(not compileall.compile_dir("{to_compile}", {depth}, "{real_dir}", ',
         'force=1, quiet=1, rx={rx}))']
 

@@ -46,8 +46,8 @@ class ByteCompileConfig(object):
             path_norm_join(os.path.sep, '{rootdir}', 'usr', 'lib', '{fname}') + ':' +
             path_norm_join(os.path.sep, '{rootdir}', 'usr', 'lib64', '{fname}'))
         # TODO: document that rx is never read from config file (IMO makes sense)
-        self._inline_script = kwargs.get('inline_script', 'import compileall, sys;' + \
-            'sys.exit(not compileall.compile_dir("{python_libdir}", {depth}, "{real_libdir}", ' + \
+        self._inline_script = kwargs.get('inline_script', 'import compileall, sys, re; ' + \
+            'sys.exit(not compileall.compile_dir("{compile_dir}", {depth}, "{real_dir}", ' + \
             'force=1, quiet=1, rx={rx}))')
         self._run = kwargs.get('run', "{python} {flags} -c '{inline_script}'")
         # TODO: check format of provided attributes
@@ -61,6 +61,8 @@ class ByteCompileConfig(object):
             path_norm_join(self._python.format(**self.formatted_dict))
         self.formatted_dict['compile_dirs'] = \
             [path_norm_join(p) for p in self._compile_dirs.format(**self.formatted_dict).split(':')]
+        # "inline_script" and "run" have to be used more times to construct more invocation
+        #  strings and therefore are not added to self.formatted_dict here
 
     def get_depth(self, directory):
         """Get depth of given directory."""
@@ -82,14 +84,14 @@ class ByteCompileConfig(object):
         invocations = []
         # first, obtain run strings for libdirs
         for l in self.formatted_dict['compile_dirs']:
-            python_libdir = path_norm_join(rpm_buildroot, l)
-            if not os.path.exists(python_libdir):
+            compile_dir = path_norm_join(rpm_buildroot, l)
+            if not os.path.exists(compile_dir):
                 continue
-            real_libdir = l
+            real_dir = l
             # construct the whole inline script
-            form_dict = dict(python_libdir=python_libdir,
-                depth=self.get_depth(python_libdir),
-                real_libdir=real_libdir, rx=None, **self.formatted_dict)
+            form_dict = dict(compile_dir=compile_dir,
+                depth=self.get_depth(compile_dir),
+                real_dir=real_dir, rx=None, **self.formatted_dict)
             form_dict['inline_script'] = self._inline_script.format(**form_dict)
 
             # construct the whole commands
@@ -103,9 +105,9 @@ class ByteCompileConfig(object):
         invocations = []
         if self.formatted_dict['default_for_rootdir']:
             rx = "re.compile(r'{0}')".format('|'.join(exclude_dirs))
-            form_dict = dict(python_libdir=rpm_buildroot,
+            form_dict = dict(compile_dir=rpm_buildroot,
                 depth=self.get_depth(rpm_buildroot),
-                real_libdir=os.path.sep, rx=rx, **self.formatted_dict)
+                real_dir=os.path.sep, rx=rx, **self.formatted_dict)
             form_dict['inline_script'] = self._inline_script.format(**form_dict)
 
             for f in flags_variations:

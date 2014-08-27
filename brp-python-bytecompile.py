@@ -193,8 +193,10 @@ def compile_roots_errors(configs):
 
     errs = {path: pythons for path, pythons in path_to_pythons.items() if len(pythons) > 1}
     if errs:
-        logging.error('Config error, following roots are to be compiled by multiple Pythons:')
-        [logging.error(e) for e in sorted(errs)]
+        logging.error('Error, following roots are to be compiled by multiple Pythons:')
+        for root, confs in sorted(errs.items()):
+            err_msg = '"{root}": {confs}'.format(root=root, confs=', '.join(sorted(confs)))
+            logging.error(err_msg)
         return True
 
     return False

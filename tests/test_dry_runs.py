@@ -1,6 +1,7 @@
 import os
 import subprocess
 
+import pytest
 
 TEST_ROOTS = os.path.join(os.path.dirname(__file__), 'test_roots')
 BYTECOMPILE_SCRIPT = 'brp-python-bytecompile.py'
@@ -29,6 +30,16 @@ def assert_libdirs_not_associated(retcode, output, libdirs, testdir, rpm_buildro
         assert BYTECOMPILE_SCRIPT + ': ' + fl in output
 
 
+def assert_multiple_default_root_pythons(retcode, output, root_pythons):
+    assert retcode == 10
+    assert BYTECOMPILE_SCRIPT + \
+        ': Error, following roots are to be compiled by multiple Pythons:' in output
+
+    check_str = '{bsc}: "{root}": {pythons}'
+    for root, pythons in root_pythons.items():
+        assert check_str.format(bsc=BYTECOMPILE_SCRIPT, root=root, pythons=', '.join(pythons)) \
+            in output
+
 def assert_compile_string(retcode, output, **kwargs):
     """This can be a bit fragile if there is some whitespace in the command..."""
     assert retcode == 0
@@ -53,8 +64,18 @@ def test_no_config_for_libdirs(pyruntime):
         testdir, rpm_buildroot)
 
 
-def test_one_libdir_and_default_python(pyruntime):
-    testdir = 'one_libdir_and_default_python'
+def test_conflicting_roots(pyruntime):
+    testdir = 'conflicting_roots'
+    rpm_buildroot = 'some/build/dir/BUILDROOT/foo-1.2.3.fcXY.x86_64'
+    retcode, out = run_bytecompile(pyruntime, testdir, rpm_buildroot)
+    assert_multiple_default_root_pythons(retcode, out,
+        {'/': ['python2.7', 'python5.6', 'python8.9'], '/foo/bar': ['pythonXX', 'pythonYY']})
+
+@pytest.mark.parametrize('has_default_python, testdir', [
+    (True, 'one_libdir_and_default_python'),
+    (False, 'one_libdir_no_default_python')
+])
+def test_one_libdir(pyruntime, has_default_python, testdir):
     rpm_buildroot = 'some/build/dir/BUILDROOT/foo-1.2.3.fcXY.x86_64'
     retcode, out = run_bytecompile(pyruntime, testdir, rpm_buildroot)
 
@@ -66,8 +87,9 @@ def test_one_libdir_and_default_python(pyruntime):
     python = '/usr/bin/python2.7'
     to_compile = to_compile_base
     rx="re.compile(r'/bin/|/sbin/|/usr/lib/python[0-9].[0-9]|/usr/lib64/python[0-9].[0-9]')"
-    assert_compile_string(retcode, out, python=python, depth=8, real_dir='/', rx=rx,
-        to_compile=to_compile_base)
+    if has_default_python:
+        assert_compile_string(retcode, out, python=python, depth=8, real_dir='/', rx=rx,
+            to_compile=to_compile_base)
 
     # then test compilation of libdirs
     for real_dir, depth in [('/usr/lib/python2.7', 4), ('/usr/lib64/python2.7', 5)]:
@@ -76,4 +98,4 @@ def test_one_libdir_and_default_python(pyruntime):
             to_compile=to_compile)
 
     # make sure that only the previously tested compile strings were printed
-    assert out.count(BYTECOMPILE_SCRIPT + ':') == 7
+    assert out.count(BYTECOMPILE_SCRIPT + ':') == 7 if has_default_python else 5

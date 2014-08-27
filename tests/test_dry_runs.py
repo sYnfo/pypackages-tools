@@ -7,8 +7,8 @@ BYTECOMPILE_SCRIPT = 'brp-python-bytecompile.py'
 BRP_PYTHON_BYTECOMPILE = os.path.join(os.path.dirname(__file__), '..', BYTECOMPILE_SCRIPT)
 
 
-def run_bytecompile(directory, rpm_buildroot):
-    proc = subprocess.Popen([BRP_PYTHON_BYTECOMPILE, '--dry-run', '--config-dir',
+def run_bytecompile(pyruntime, directory, rpm_buildroot):
+    proc = subprocess.Popen([pyruntime, BRP_PYTHON_BYTECOMPILE, '--dry-run', '--config-dir',
         os.path.join(TEST_ROOTS, directory, 'etc', 'pypackages-tools'), 'python', '1'],
         stdout=subprocess.PIPE,
         stderr=subprocess.STDOUT,
@@ -45,18 +45,18 @@ def assert_compile_string(retcode, output, **kwargs):
         check_string = ''.join(check_template).format(**kwargs)
         assert check_string in output
 
-def test_no_config_for_libdirs():
+def test_no_config_for_libdirs(pyruntime):
     testdir = 'no_configs'
     rpm_buildroot = 'some/build/dir/BUILDROOT/foo-1.2.3.fcXY.x86_64'
-    retcode, out = run_bytecompile(testdir, rpm_buildroot)
+    retcode, out = run_bytecompile(pyruntime, testdir, rpm_buildroot)
     assert_libdirs_not_associated(retcode, out, ['usr/lib/python2.7', 'usr/lib64/python8.9'],
         testdir, rpm_buildroot)
 
 
-def test_one_libdir_and_default_python():
+def test_one_libdir_and_default_python(pyruntime):
     testdir = 'one_libdir_and_default_python'
     rpm_buildroot = 'some/build/dir/BUILDROOT/foo-1.2.3.fcXY.x86_64'
-    retcode, out = run_bytecompile(testdir, rpm_buildroot)
+    retcode, out = run_bytecompile(pyruntime, testdir, rpm_buildroot)
 
     assert 'Running from config "python2.7":' in out
 
@@ -74,3 +74,6 @@ def test_one_libdir_and_default_python():
         to_compile = to_compile_base + real_dir
         assert_compile_string(retcode, out, python=python, depth=depth, real_dir=real_dir, rx=None,
             to_compile=to_compile)
+
+    # make sure that only the previously tested compile strings were printed
+    assert out.count(BYTECOMPILE_SCRIPT + ':') == 7
